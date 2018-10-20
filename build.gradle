@@ -1,9 +1,16 @@
+import nz.govt.natlib.m11n.tools.automation.logging.Timekeeper
+import nz.govt.natlib.tools.sip.generation.fairfax.FairfaxFile
+import nz.govt.natlib.m11n.tools.gradle.BuildException
+import nz.govt.natlib.m11n.tools.gradle.ProjectHelper
+
 buildscript {
     repositories {
         mavenLocal()
         mavenCentral()
     }
     dependencies {
+        classpath 'nz.govt.natlib.m11n.tools:nlnz-m11n-tools-automation-plugin:1.0.0-SNAPSHOT'
+        classpath 'nz.govt.natlib.m11n.tools:nlnz-m11n-tools-gradle-plugin:1.0.0-SNAPSHOT'
         classpath 'nz.govt.natlib.tools.sip.generation:nlnz-tools-sip-generation-gradle-plugin:1.0.0-SNAPSHOT'
         classpath 'nz.govt.natlib.tools.sip.generation.fairfax:nlnz-tools-sip-generation-fairfax-gradle-plugin:1.0.0-SNAPSHOT'
     }
@@ -13,8 +20,14 @@ group 'nz.govt.natlib.tools.sip.generation.fairfax'
 description = 'National Library SIP Generation Processor for Fairfax files.'
 
 project.ext {
-    vendor = "New Zealand National Library"
+    vendor = "National Library of New Zealand"
     versionNumber = "1.0.0-SNAPSHOT"
+
+    // Command-line variables used for specific tasks
+    // Task processFiles
+    doProcessFiles = ProjectHelper.hasAnyTasks(project, [ "processFiles" ])
+    sourceFolderValue = project.hasProperty('sourceFolder') ? project.sourceFolder : null
+    destinationFolderValue = project.hasProperty('destinationFolder') ? project.destinationFolder : null
 }
 
 apply plugin: 'base'
@@ -22,4 +35,53 @@ apply plugin: 'base'
 setVersion(project.versionNumber)
 
 configurations {
+}
+
+Timekeeper timekeeper = new Timekeeper()
+timekeeper.start()
+
+task processFiles {
+    File sourceFolder
+    File destinationFolder
+    if (project.doProcessFiles) {
+        if (project.sourceFolderValue == null) {
+            throw new BuildException("Source-folder=${project.sourceFolderValue} cannot be null. Please specify a source folder using -PsourceFolder=<source-folder-value>")
+        }
+        if (project.destinationFolderValue == null) {
+            throw new BuildException("Destination-folder=${project.sourceFolderValue} cannot be null. Please specify a destination folder using -PdestinationFolder=<destination-folder-value>")
+        }
+        sourceFolder = new File(project.sourceFolderValue)
+        if (!sourceFolder.exists() || !sourceFolder.isDirectory()) {
+            throw new BuildException("Source-folder=${sourceFolder.getCanonicalPath()} must exist=${sourceFolder.exists()} and must be a directory=${sourceFolder.isDirectory()}")
+        }
+        destinationFolder = new File(project.destinationFolderValue)
+        if (!destinationFolder.exists() && !sourceFolder.isDirectory()) {
+            throw new BuildException("Destination-folder=${destinationFolder.getCanonicalPath()} exist=${destinationFolder.exists()} and must be a directory=${destinationFolder.isDirectory()}")
+        }
+    }
+    doLast {
+        println("STARTING processFiles doLast")
+        FileNameFinder fileNameFinder = new FileNameFinder()
+        List<String> filenames = fileNameFinder.getFileNames(sourceFolder.getAbsolutePath(), "**/*.pdf")
+        List<FairfaxFile> fairfaxFiles = filenames.collect { String filename ->
+            new FairfaxFile(new File(filename))
+        }
+        fairfaxFiles = fairfaxFiles.sort()
+
+        FairfaxFile previousFile
+        fairfaxFiles.each { FairfaxFile fairfaxFile ->
+            if (previousFile != null) {
+                if (previousFile.prefix != fairfaxFile.prefix) {
+                    println("* * * CHANGE OF PREFIX * * *")
+                } else if (previousFile.date != fairfaxFile.date) {
+                    println("* * * CHANGE OF DATE * * *")
+                }
+            }
+            println(fairfaxFile)
+
+            previousFile = fairfaxFile
+        }
+
+        timekeeper.logElapsed()
+    }
 }
