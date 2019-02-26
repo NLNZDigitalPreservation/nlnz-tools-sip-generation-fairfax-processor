@@ -55,4 +55,4 @@ See git commits to see who contributors are. Issues are tracked through the git 
 
 ## License
 
-&copy; 2018 National Library of New Zealand. All rights reserved. MIT license.
+&copy; 2018 -- 2019 National Library of New Zealand. All rights reserved. MIT license.
