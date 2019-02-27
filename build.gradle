@@ -4,8 +4,8 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath 'nz.govt.natlib.tools.sip.generation:nlnz-tools-sip-generation-gradle-plugin:1.0.0-SNAPSHOT'
-        classpath 'nz.govt.natlib.tools.sip.generation.fairfax:nlnz-tools-sip-generation-fairfax-gradle-plugin:1.0.0-SNAPSHOT'
+        classpath 'nz.govt.natlib.tools:sip-generation-gradle-plugin:1.0.0-SNAPSHOT'
+        classpath 'nz.govt.natlib.tools:sip-generation-fairfax-gradle-plugin:1.0.0-SNAPSHOT'
     }
 }
 
