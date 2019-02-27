@@ -17,18 +17,37 @@ At this time there is no important information to impart.
 ## Requirements
 
 - A set of Fairfax files for ingestion
+- The nlnz-m11n-tools-automation-plugin
+- The nlnz-m11n-tools-gradle-plugin
 - The nlnz-tools-sip-generation-gradle-plugin
 - The nlnz-tools-sip-generation-fairfax-gradle-plugin
 
 ## Usage
 
+### Processing files
+Process a set of Fairfax files.
+
+Example:
+```
+gradle processFiles \
+    -PsourceFolder="/path/to/source/folder" \
+    -PdestinationFolder="/path/to/destination/folder"
+```
 ### Parameters
 
 Parameters and their usage.
 
-### Running
+#### sourceFolder
+The source folder of the Fairfax files.
+```
+-PsourceFolder="/path/to/source/folder"
+```
 
-Running the tool.
+#### destinationFolder
+The destination folder for processed files.
+```
+-PdestinationFolder="/path/to/destination/folder"
+```
 
 ## Contributors
 
@@ -36,5 +55,4 @@ See git commits to see who contributors are. Issues are tracked through the git 
 
 ## License
 
-&copy; 2018 National Library of New Zealand. All rights reserved. MIT license.
-
+&copy; 2018 -- 2019 National Library of New Zealand. All rights reserved. MIT license.

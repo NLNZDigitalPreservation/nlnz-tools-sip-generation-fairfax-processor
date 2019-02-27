@@ -1,20 +1,42 @@
+import nz.govt.natlib.m11n.tools.automation.logging.Timekeeper
+import nz.govt.natlib.tools.sip.files.FilesFinder
+import nz.govt.natlib.tools.sip.generation.fairfax.FairfaxFilesProcessor
+import nz.govt.natlib.tools.sip.generation.fairfax.FairfaxSpreadsheet
+import nz.govt.natlib.tools.sip.generation.fairfax.FairfaxFile
+import nz.govt.natlib.tools.sip.pdf.PdfInformationExtractor
+import nz.govt.natlib.m11n.tools.gradle.BuildException
+import nz.govt.natlib.m11n.tools.gradle.ProjectHelper
+import nz.govt.natlib.tools.sip.state.SipProcessingState
+
+import java.nio.file.Files
+import java.nio.file.Paths
+
 buildscript {
     repositories {
         mavenLocal()
         mavenCentral()
     }
     dependencies {
+        classpath 'nz.govt.natlib.m11n.tools:automation-plugin:1.0.0-SNAPSHOT'
+        classpath 'nz.govt.natlib.m11n.tools:gradle-plugin:1.0.0-SNAPSHOT'
         classpath 'nz.govt.natlib.tools:sip-generation-gradle-plugin:1.0.0-SNAPSHOT'
         classpath 'nz.govt.natlib.tools:sip-generation-fairfax-gradle-plugin:1.0.0-SNAPSHOT'
     }
 }
 
-group 'nz.govt.natlib.tools.sip.generation.fairfax'
+group 'nz.govt.natlib.tools'
 description = 'National Library SIP Generation Processor for Fairfax files.'
 
 project.ext {
-    vendor = "New Zealand National Library"
+    vendor = "National Library of New Zealand"
     versionNumber = "1.0.0-SNAPSHOT"
+
+    // Command-line variables used for specific tasks
+    // Task processFiles
+    doProcessFiles = ProjectHelper.hasAnyTasks(project, [ "processFiles" ])
+    sourceFolderValue = project.hasProperty('sourceFolder') ? project.sourceFolder : null
+    destinationFolderValue = project.hasProperty('destinationFolder') ? project.destinationFolder : null
+
 }
 
 apply plugin: 'base'
@@ -22,4 +44,171 @@ apply plugin: 'base'
 setVersion(project.versionNumber)
 
 configurations {
+}
+
+Closure<List<File>> findFiles = { String localPath, boolean isRegexNotGlob, boolean matchFilenameOnly,
+                                  boolean sortFiles, String pattern ->
+    List<File> filesList = [ ]
+    java.nio.file.Path filesPath = Paths.get(localPath)
+    if (!Files.exists(filesPath) || !Files.isDirectory(filesPath)) {
+        logger.warn("Path '${filesPath}' does not exist is not a directory. Returning empty file list.")
+        return filesList
+    }
+
+    filesList = FilesFinder.getMatchingFiles(filesPath, isRegexNotGlob, matchFilenameOnly, sortFiles, pattern)
+    return filesList
+}
+
+Timekeeper timekeeper = new Timekeeper()
+timekeeper.start()
+
+task processFiles() {
+    File sourceFolder
+    File destinationFolder
+    if (project.doProcessFiles) {
+        if (project.sourceFolderValue == null) {
+            throw new BuildException("Source-folder=${project.sourceFolderValue} cannot be null. Please specify a source folder using -PsourceFolder=<source-folder-value>")
+        }
+        if (project.destinationFolderValue == null) {
+            throw new BuildException("Destination-folder=${project.sourceFolderValue} cannot be null. Please specify a destination folder using -PdestinationFolder=<destination-folder-value>")
+        }
+        sourceFolder = new File(project.sourceFolderValue)
+        if (!sourceFolder.exists() || !sourceFolder.isDirectory()) {
+            throw new BuildException("Source-folder=${sourceFolder.getCanonicalPath()} must exist=${sourceFolder.exists()} and must be a directory=${sourceFolder.isDirectory()}")
+        }
+        destinationFolder = new File(project.destinationFolderValue)
+        if (!destinationFolder.exists() && !sourceFolder.isDirectory()) {
+            throw new BuildException("Destination-folder=${destinationFolder.getCanonicalPath()} exist=${destinationFolder.exists()} and must be a directory=${destinationFolder.isDirectory()}")
+        }
+    }
+    doLast {
+        println("STARTING processFiles doLast")
+        logger.info("sourceFolder=${sourceFolder}")
+        logger.info("destinationFolder=${destinationFolder}")
+
+        boolean isRegexNotGlob = true
+        boolean matchFilenameOnly = true
+        boolean sortFiles = true
+        String pattern = ".*?\\.pdf"
+        List<File> foundFiles = findFiles(sourceFolder.getAbsolutePath(), isRegexNotGlob, matchFilenameOnly, sortFiles, pattern)
+        List<FairfaxFile> fairfaxFiles = foundFiles.collect { File file ->
+            new FairfaxFile(file)
+        }
+
+        FairfaxFile previousFile
+        fairfaxFiles.each { FairfaxFile fairfaxFile ->
+            if (previousFile != null) {
+                if (previousFile.name != fairfaxFile.name) {
+                    println("* * * CHANGE OF PREFIX * * *")
+                } else if (previousFile.edition != fairfaxFile.edition) {
+                    println("* * * CHANGE OF EDITION * * *")
+                } else if (previousFile.date != fairfaxFile.date) {
+                    println("* * * CHANGE OF DATE * * *")
+                }
+            }
+            println(fairfaxFile)
+
+            previousFile = fairfaxFile
+        }
+
+        timekeeper.logElapsed()
+    }
+}
+
+task extractMetadata() {
+    File sourceFolder
+    File destinationFolder
+    doLast {
+        if (ProjectHelper.hasAnyTasks(project, [ "extractMetadata" ])) {
+            if (project.sourceFolderValue == null) {
+                throw new BuildException("Source-folder=${project.sourceFolderValue} cannot be null. Please specify a source folder using -PsourceFolder=<source-folder-value>")
+            }
+            println("sourceFolder=${sourceFolder}")
+            sourceFolder = new File(project.sourceFolderValue)
+            if (!sourceFolder.exists() || !sourceFolder.isDirectory()) {
+                throw new BuildException("Source-folder=${sourceFolder.getCanonicalPath()} must exist=${sourceFolder.exists()} and must be a directory=${sourceFolder.isDirectory()}")
+            }
+            println("STARTING processFiles doLast")
+            FileNameFinder fileNameFinder = new FileNameFinder()
+            println("BEFORE")
+            List<String> filenames = fileNameFinder.getFileNames(sourceFolder.getAbsolutePath(), "**/*.pdf")
+            println("***AFTER")
+            List<File> pdfFiles = filenames.collect { String filename ->
+                new File(filename)
+            }
+
+            pdfFiles.each { File pdfFile ->
+                println("* * * * *")
+                println("${pdfFile.getCanonicalPath()} METADATA:")
+                Map<String, String> pdfMetadata = PdfInformationExtractor.extractMetadata(pdfFile)
+                pdfMetadata.each { String key, String value ->
+                    println("    key=${key}, value=${value}")
+                }
+                println("* * * * *")
+                println("* * * * *")
+                println("${pdfFile.getCanonicalPath()} TEXT:")
+                String text = PdfInformationExtractor.extractText(pdfFile)
+                println("${text}")
+                println("* * * * *")
+                println("* * * * *")
+                println("")
+            }
+
+            timekeeper.logElapsed()
+        }
+    }
+}
+
+
+task findMatchingPdfContents() {
+    File sourceFolder
+    File destinationFolder
+    doLast {
+        logger.info("STARTING findMatchingPdfContents doLast")
+        if (ProjectHelper.hasAnyTasks(project, [ "findMatchingPdfContents" ])) {
+            SipProcessingState sipProcessingState = new SipProcessingState()
+            if (project.sourceFolderValue == null) {
+                throw new BuildException("Source-folder=${project.sourceFolderValue} cannot be null. Please specify a source folder using -PsourceFolder=<source-folder-value>")
+            }
+            logger.info("sourceFolder=${project.sourceFolderValue}")
+            sourceFolder = new File(project.sourceFolderValue)
+            if (!sourceFolder.exists() || !sourceFolder.isDirectory()) {
+                throw new BuildException("Source-folder=${sourceFolder.getCanonicalPath()} must exist=${sourceFolder.exists()} and must be a directory=${sourceFolder.isDirectory()}")
+            }
+
+            // Need to take the information spreadsheet and find file sets that match
+            // Which means:
+            //  - Given a group of files that match on the [prefix] and [date] (which forms a set of files)
+            //  - Sort the files by name
+            //  - Start from the first file, can we find a match for the MMSID?
+            //      - If so, we've got a result
+            //      - If not, we've got an exception
+
+            FairfaxSpreadsheet fairfaxSpreadsheet = FairfaxSpreadsheet.defaultInstance()
+
+            // TODO Perhaps a 'streaming-like' approach, otherwise we have to find all the files (which could be thousands)
+            // before processing them.
+            // One approach would be to only find files for a certain date mask and step through the dates one by one
+            boolean isRegexNotGlob = true
+            boolean matchFilenameOnly = true
+            boolean sortFiles = true
+            String pattern = ".*?\\.pdf"
+            List<File> filesForProcessing = findFiles(sourceFolder.getAbsolutePath(), isRegexNotGlob, matchFilenameOnly, sortFiles, pattern)
+            logger.info("Collected ${filesForProcessing.size()} files for processing")
+            filesForProcessing.each { File file ->
+                logger.info("File for processing=${file.getCanonicalPath()}")
+            }
+
+            String sipAsXml = FairfaxFilesProcessor.processCollectedFiles(sipProcessingState, fairfaxSpreadsheet,
+                    filesForProcessing)
+            logger.info("Total files processed=${sipProcessingState.totalFilesProcessed}")
+
+            // TODO:
+            // - Write out SIP
+            // - Move SIP and processed files to target folder
+            // - Include any SIP processing exceptions (write to file)
+
+            timekeeper.logElapsed()
+        }
+    }
 }
