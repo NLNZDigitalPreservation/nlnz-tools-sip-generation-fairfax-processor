@@ -1,6 +1,5 @@
 import nz.govt.natlib.m11n.tools.automation.logging.Timekeeper
 import nz.govt.natlib.tools.sip.files.FilesFinder
-import nz.govt.natlib.tools.sip.generation.fairfax.FairfaxFilesProcessor
 import nz.govt.natlib.tools.sip.generation.fairfax.FairfaxSpreadsheet
 import nz.govt.natlib.tools.sip.generation.fairfax.FairfaxFile
 import nz.govt.natlib.tools.sip.pdf.PdfInformationExtractor
@@ -10,6 +9,8 @@ import nz.govt.natlib.tools.sip.state.SipProcessingState
 
 import java.nio.file.Files
 import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
+import java.time.LocalDate
 
 buildscript {
     repositories {
@@ -32,10 +33,42 @@ project.ext {
     versionNumber = "1.0.0-SNAPSHOT"
 
     // Command-line variables used for specific tasks
+
+    startingDateValue = project.hasProperty('startingDate') ? project.startingDate : null
+    endingDateValue = project.hasProperty('endingDate') ? project.endingDate : null
+
+    genericSourceFolderValue = project.hasProperty('genericSourceFolder') ? project.genericSourceFolder : null
+
+    // Task groupByDateAndName
+    doGroupByDateAndName = ProjectHelper.hasAnyTasks(project, [ "groupByDateAndName", "processFiles" ])
+    groupByDateAndNameSourceFolderValue = project.hasProperty('groupByDateAndNameSourceFolder') ?
+            project.groupByDateAndNameSourceFolder : null
+    groupByDateAndNameDestinationFolderValue = project.hasProperty('groupByDateAndNameDestinationFolder') ?
+            project.groupByDateAndNameDestinationFolder : null
+    groupByDateAndNameMoveFilesValue = (project.hasProperty('groupByDateAndNameMoveFiles') ?
+            project.groupByDateAndNameMoveFiles : false).toBoolean()
+    groupByDateAndNameCreateDestinationValue = (project.hasProperty('groupByDateAndNameCreateDestination') ?
+            project.groupByDateAndNameCreateDestination : true).toBoolean()
+
+    // Task processByDate
+    doProcessByDate = ProjectHelper.hasAnyTasks(project, [ "processByDate", "processFiles" ])
+    processByDateSourceFolderValue = project.hasProperty('processByDateSourceFolder') ?
+            project.processByDateSourceFolder : null
+    processByDateDestinationFolderValue = project.hasProperty('processByDateDestinationFolder') ?
+            project.processByDateDestinationFolder : null
+    processByDateMoveFilesValue = (project.hasProperty('processByDateMoveFiles') ?
+            project.processByDateMoveFiles : false).toBoolean()
+    processByDateCreateDestinationValue = (project.hasProperty('processByDateCreateDestination') ?
+            project.processByDateCreateDestination : true).toBoolean()
+
     // Task processFiles
     doProcessFiles = ProjectHelper.hasAnyTasks(project, [ "processFiles" ])
-    sourceFolderValue = project.hasProperty('sourceFolder') ? project.sourceFolder : null
-    destinationFolderValue = project.hasProperty('destinationFolder') ? project.destinationFolder : null
+
+    // Task listFiles
+    doListFiles = ProjectHelper.hasAnyTasks(project, [ "listFiles" ])
+
+    // Task extractMetadata
+    doExtractMetadata = ProjectHelper.hasAnyTasks(project, [ "extractMetadata" ])
 
 }
 
@@ -44,6 +77,14 @@ apply plugin: 'base'
 setVersion(project.versionNumber)
 
 configurations {
+}
+
+Closure<LocalDate> parseDate = { String dateString ->
+    LocalDate parsedDate = null
+    if (dateString != null) {
+        parsedDate = LocalDate.parse(dateString, FairfaxFile.LOCAL_DATE_TIME_FORMATTER)
+    }
+    return parsedDate
 }
 
 Closure<List<File>> findFiles = { String localPath, boolean isRegexNotGlob, boolean matchFilenameOnly,
@@ -59,80 +100,275 @@ Closure<List<File>> findFiles = { String localPath, boolean isRegexNotGlob, bool
     return filesList
 }
 
+Closure<List<File>> matchFiles = { List<File> allFiles, String pattern ->
+    List<File> matchedFiles = [ ]
+    allFiles.each { File file ->
+        if (file.getName() ==~ /${pattern}/) {
+            matchedFiles.add(file)
+        }
+    }
+
+    return matchedFiles
+}
+
+Closure<Object> copyOrMoveFileToDateAndNameGroup = { File destinationFolder, FairfaxFile targetFile,
+                                                     FairfaxSpreadsheet spreadsheet, boolean moveFile ->
+    String dateFolderName = "${targetFile.dateYear}${targetFile.dateMonthOfYear}${targetFile.dateDayOfMonth}"
+    String nameFolderName = targetFile.name
+    String folderPath
+    Set<String> allNameKeys = spreadsheet.allNameKeys
+
+    if (allNameKeys.contains(targetFile.name)) {
+        // There's an entry in the spreadsheet for this name
+        // Goes to '<date>/<name>/<file>'
+        folderPath = "${destinationFolder}${File.separator}${dateFolderName}${File.separator}${nameFolderName}"
+    } else {
+        // There is no entry in the spreadsheet for this name
+        // Goes to 'unknown/<date>/<file>'
+        folderPath = "${destinationFolder}${File.separator}unknown{File.separator}${dateFolderName}"
+    }
+    File destination = new File(folderPath)
+    destination.mkdirs()
+
+    if (moveFile) {
+        Files.move(targetFile.file.toPath(), destination.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
+    } else {
+        Files.copy(targetFile.file.toPath(), destination.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
+    }
+}
+
 Timekeeper timekeeper = new Timekeeper()
 timekeeper.start()
 
-task processFiles() {
+task groupByDateAndName(dependsOn: [ ]) {
     File sourceFolder
     File destinationFolder
-    if (project.doProcessFiles) {
-        if (project.sourceFolderValue == null) {
-            throw new BuildException("Source-folder=${project.sourceFolderValue} cannot be null. Please specify a source folder using -PsourceFolder=<source-folder-value>")
+    if (project.doGroupByDateAndName) {
+        if (project.groupByDateAndNameSourceFolderValue == null) {
+            throw new BuildException("groupByDateAndName Source-folder=${project.groupByDateAndNameSourceFolderValue} cannot be null. Please specify a source folder using -PgroupByDateAndNameSourceFolder=<source-folder-value>")
         }
-        if (project.destinationFolderValue == null) {
-            throw new BuildException("Destination-folder=${project.sourceFolderValue} cannot be null. Please specify a destination folder using -PdestinationFolder=<destination-folder-value>")
+        if (project.groupByDateAndNameDestinationFolderValue == null) {
+            throw new BuildException("groupByDateAndName Destination-folder=${project.groupByDateAndNameDestinationFolderValue} cannot be null. Please specify a destination folder using -PgroupByDateAndNameDestinationFolder=<destination-folder-value>")
         }
-        sourceFolder = new File(project.sourceFolderValue)
+        sourceFolder = new File((String) project.groupByDateAndNameSourceFolderValue)
         if (!sourceFolder.exists() || !sourceFolder.isDirectory()) {
-            throw new BuildException("Source-folder=${sourceFolder.getCanonicalPath()} must exist=${sourceFolder.exists()} and must be a directory=${sourceFolder.isDirectory()}")
+            throw new BuildException("groupByDateAndName Source-folder=${sourceFolder.getCanonicalPath()} must exist=${sourceFolder.exists()} and must be a directory=${sourceFolder.isDirectory()}")
         }
-        destinationFolder = new File(project.destinationFolderValue)
-        if (!destinationFolder.exists() && !sourceFolder.isDirectory()) {
-            throw new BuildException("Destination-folder=${destinationFolder.getCanonicalPath()} exist=${destinationFolder.exists()} and must be a directory=${destinationFolder.isDirectory()}")
+        destinationFolder = new File((String) project.groupByDateAndNameDestinationFolderValue)
+        if (!project.groupByDateAndNameCreateDestinationValue && !destinationFolder.exists() && !sourceFolder.isDirectory()) {
+            throw new BuildException("groupByDateAndName groupByDateAndNameCreateDestination=${project.groupByDateAndNameCreateDestination}, so Destination-folder=${destinationFolder.getCanonicalPath()} must exist=${destinationFolder.exists()} and must be a directory=${destinationFolder.isDirectory()}")
         }
     }
     doLast {
-        println("STARTING processFiles doLast")
-        logger.info("sourceFolder=${sourceFolder}")
-        logger.info("destinationFolder=${destinationFolder}")
+        if (project.doGroupByDateAndName) {
 
-        boolean isRegexNotGlob = true
-        boolean matchFilenameOnly = true
-        boolean sortFiles = true
-        String pattern = ".*?\\.pdf"
-        List<File> foundFiles = findFiles(sourceFolder.getAbsolutePath(), isRegexNotGlob, matchFilenameOnly, sortFiles, pattern)
-        List<FairfaxFile> fairfaxFiles = foundFiles.collect { File file ->
-            new FairfaxFile(file)
-        }
+            if (project.groupByDateAndNameCreateDestinationValue) {
+                destinationFolder.mkdirs()
+            }
+            FairfaxSpreadsheet fairfaxSpreadsheet = FairfaxSpreadsheet.defaultInstance()
 
-        FairfaxFile previousFile
-        fairfaxFiles.each { FairfaxFile fairfaxFile ->
-            if (previousFile != null) {
-                if (previousFile.name != fairfaxFile.name) {
-                    println("* * * CHANGE OF PREFIX * * *")
-                } else if (previousFile.edition != fairfaxFile.edition) {
-                    println("* * * CHANGE OF EDITION * * *")
-                } else if (previousFile.date != fairfaxFile.date) {
-                    println("* * * CHANGE OF DATE * * *")
+            boolean isRegexNotGlob = true
+            boolean matchFilenameOnly = true
+            boolean sortFiles = true
+
+            String pattern = '\\w{6}-\\d{8}-\\w{3,4}\\.pdf'
+            // Given that we could be dealing with 60,000+ files in the source directory, it's probably more efficient to
+            // get them all at once
+            logger.info("About to find all files in sourceFolder=${sourceFolder}")
+            timekeeper.logElapsed()
+            List<File> allFiles = findFiles(sourceFolder.getAbsolutePath(), isRegexNotGlob, matchFilenameOnly, sortFiles, pattern)
+            logger.info("Found total=${allFiles.size()} in sourceFolder=${sourceFolder}")
+            timekeeper.logElapsed()
+
+            LocalDate startingDate = parseDate((String) project.startingDateValue)
+            LocalDate endingDate = parseDate((String) project.endingDateValue)
+            if (startingDate != null || endingDate != null) {
+                // if we are using a date range then we must find by date
+                if (startingDate == null) {
+                    startingDate = parseDate("20170101")
+                }
+                if (endingDate == null) {
+                    endingDate = LocalDate.now()
+                }
+                // Loop through the dates in sequence, finding and processing files
+                LocalDate currentDate = startingDate
+                while (currentDate.isBefore(endingDate)) {
+                    pattern = '\\w{6}-' + FairfaxFile.LOCAL_DATE_TIME_FORMATTER.format(currentDate) + '-\\w{3,4}\\.pdf'
+                    logger.info("Searching for files matching pattern=${pattern}")
+                    List<File> foundFiles = matchFiles(allFiles, pattern)
+                    foundFiles.each { File foundFile ->
+                        copyOrMoveFileToDateAndNameGroup(destinationFolder, new FairfaxFile(foundFile), fairfaxSpreadsheetproject.groupByDateAndNameMoveFilesValue)
+                    }
+                }
+            } else {
+                //String pattern = ".*?\\.pdf"
+                List<File> foundFiles = findFiles(sourceFolder.getAbsolutePath(), isRegexNotGlob, matchFilenameOnly, sortFiles, pattern)
+                foundFiles.each { File foundFile ->
+                    copyOrMoveFileToDateAndNameGroup(destinationFolder, new FairfaxFile(foundFile), fairfaxSpreadsheet,
+                            project.groupByDateAndNameMoveFilesValue)
                 }
             }
-            println(fairfaxFile)
-
-            previousFile = fairfaxFile
         }
 
-        timekeeper.logElapsed()
+    }
+}
+
+Closure<List<File>> processNameFolder = { File nameFolder, File destinationFolder, boolean moveFilesToDestination,
+                                          FairfaxSpreadsheet fairfaxSpreadsheet ->
+    List<Files> processedFiles = [ ]
+    // Process the files in the name folder
+    // TODO
+    // If the files aren't recognized, then dump the files in an exception folder
+    // Need a method to aggregate files correctly (FairfaxFilesProcessor?)
+    // Move or copy files to destination
+    // Write out SIP processing state to a file (including SipProcessingExceptions)
+    // Note that there may be multiple destinations (as there could be different editions of the same name for a given day).
+
+    boolean isRegexNotGlob = true
+    boolean matchFilenameOnly = true
+    boolean sortFiles = true
+    // Only process PDF files
+    String pattern = '\\w{6}-\\d{8}-\\w{3,4}\\.pdf'
+    logger.info("Searching for files matching pattern=${pattern}")
+
+    List<File> allFiles = findFiles(nameFolder.getAbsolutePath(), isRegexNotGlob, matchFilenameOnly, sortFiles, pattern)
+    allFiles.each { File foundFile ->
+        // TODO This is where the processing occurs
+    }
+
+    return proessedFiles
+}
+
+task processByDate(dependsOn: [ groupByDateAndName ]) {
+    File sourceFolder
+    File destinationFolder
+    if (project.doProcessByDate) {
+        if (project.processByDateSourceFolderValue == null) {
+            throw new BuildException("processByDate Source-folder=${project.processByDateSourceFolderValue} cannot be null. Please specify a source folder using -PprocessByDateSourceFolder=<source-folder-value>")
+        }
+        if (project.processByDateDestinationFolderValue == null) {
+            throw new BuildException("processByDate Destination-folder=${project.processByDateDestinationFolderValue} cannot be null. Please specify a destination folder using -PprocessByDateDestinationFolder=<destination-folder-value>")
+        }
+        sourceFolder = new File((String) project.processByDateSourceFolderValue)
+        if (!sourceFolder.exists() || !sourceFolder.isDirectory()) {
+            throw new BuildException("processByDate Source-folder=${sourceFolder.getCanonicalPath()} must exist=${sourceFolder.exists()} and must be a directory=${sourceFolder.isDirectory()}")
+        }
+        destinationFolder = new File((String) project.processByDateDestinationFolderValue)
+        if (!project.processByDateCreateDestinationValue && !destinationFolder.exists() && !sourceFolder.isDirectory()) {
+            throw new BuildException("processByDate processByDateCreateDestination=${project.processByDateCreateDestination}, so Destination-folder=${destinationFolder.getCanonicalPath()} must exist=${destinationFolder.exists()} and must be a directory=${destinationFolder.isDirectory()}")
+        }
+    }
+    doLast {
+        if (project.doProcessByDate) {
+            if (project.processByDateCreateDestinationValue) {
+                destinationFolder.mkdirs()
+            }
+
+            FairfaxSpreadsheet fairfaxSpreadsheet = FairfaxSpreadsheet.defaultInstance()
+
+            LocalDate startingDate = parseDate((String) project.startingDateValue)
+            LocalDate endingDate = parseDate((String) project.endingDateValue)
+
+            // We always have a date range.
+            if (startingDate == null) {
+                startingDate = parseDate("20170101")
+            }
+            if (endingDate == null) {
+                endingDate = LocalDate.now()
+            }
+
+            // Loop through the dates in sequence, finding and processing files
+            LocalDate currentDate = startingDate
+            while (currentDate.isBefore(endingDate)) {
+                // The folder structure is <sourceFolder>/<date>/<name>/{files}
+                File dateFolder = new File(sourceFolder, FairfaxFile.LOCAL_DATE_TIME_FORMATTER.format(currentDate))
+                if (dateFolder.exists() && dateFolder.isDirectory()) {
+                    dateFolder.listFiles().each { File subFile ->
+                        if (subFile.isDirectory()) {
+                            // we want to process this directory, which should be a <name>
+                            processNameFolder(subFile, destinationFolder, project.processByDateMoveFilesValue,
+                                    fairfaxSpreadsheet)
+                        } else {
+                            logger.info("Skipping ${subFile.getCanonicalPath()} as not directory=${subFile.isDirectory()}")
+                        }
+                    }
+                } else {
+                    logger.info("Skipping ${dateFolder.getCanonicalPath()} as exists=${dateFolder.exists()}, directory=${dateFolder.isDirectory()}")
+                }
+            }
+        }
+    }
+}
+
+task processFiles(dependsOn: [ groupByDateAndName, processByDate ]) {
+}
+
+task listFiles(dependsOn: [ ]) {
+    File sourceFolder
+    if (project.doListFiles) {
+        if (project.genericSourceFolderValue == null) {
+            throw new BuildException("Source-folder=${project.genericSourceFolderValue} cannot be null. Please specify a source folder using -PgenericSourceFolder=<source-folder-value>")
+        }
+        sourceFolder = new File((String) project.genericSourceFolderValue)
+    }
+    doLast {
+        if (project.doListFiles) {
+
+            println("STARTING listFiles doLast")
+            logger.info("sourceFolder=${project.listFilesSourceFolderValue}")
+
+            boolean isRegexNotGlob = true
+            boolean matchFilenameOnly = true
+            boolean sortFiles = true
+            String pattern = ".*?\\.pdf"
+            List<File> foundFiles = findFiles(sourceFolder.getAbsolutePath(), isRegexNotGlob, matchFilenameOnly, sortFiles, pattern)
+            List<FairfaxFile> fairfaxFiles = foundFiles.collect { File file ->
+                new FairfaxFile(file)
+            }
+
+            FairfaxFile previousFile
+            fairfaxFiles.each { FairfaxFile fairfaxFile ->
+                if (previousFile != null) {
+                    if (previousFile.name != fairfaxFile.name) {
+                        println("* * * CHANGE OF PREFIX * * *")
+                    } else if (previousFile.edition != fairfaxFile.edition) {
+                        println("* * * CHANGE OF EDITION * * *")
+                    } else if (previousFile.dateYear != fairfaxFile.dateYear &&
+                            previousFile.dateMonthOfYear != fairfaxFile.dateMonthOfYear &&
+                            previousFile.dateDayOfMonth != fairfaxFile.dateDayOfMonth) {
+                        println("* * * CHANGE OF DATE * * *")
+                    }
+                }
+                println(fairfaxFile)
+
+                previousFile = fairfaxFile
+            }
+
+            timekeeper.logElapsed()
+        }
     }
 }
 
 task extractMetadata() {
     File sourceFolder
-    File destinationFolder
+    if (project.doExtractMetadata) {
+        if (project.genericSourceFolderValue == null) {
+            throw new BuildException("Source-folder=${project.genericSourceFolderValue} cannot be null. Please specify a source folder using -PgenericSourceFolder=<source-folder-value>")
+        }
+        sourceFolder = new File((String) project.genericSourceFolderValue)
+    }
     doLast {
-        if (ProjectHelper.hasAnyTasks(project, [ "extractMetadata" ])) {
+        if (project.doExtractMetadata) {
+            println("STARTING extractMetadata doLast")
             if (project.sourceFolderValue == null) {
                 throw new BuildException("Source-folder=${project.sourceFolderValue} cannot be null. Please specify a source folder using -PsourceFolder=<source-folder-value>")
             }
             println("sourceFolder=${sourceFolder}")
-            sourceFolder = new File(project.sourceFolderValue)
             if (!sourceFolder.exists() || !sourceFolder.isDirectory()) {
                 throw new BuildException("Source-folder=${sourceFolder.getCanonicalPath()} must exist=${sourceFolder.exists()} and must be a directory=${sourceFolder.isDirectory()}")
             }
-            println("STARTING processFiles doLast")
             FileNameFinder fileNameFinder = new FileNameFinder()
-            println("BEFORE")
             List<String> filenames = fileNameFinder.getFileNames(sourceFolder.getAbsolutePath(), "**/*.pdf")
-            println("***AFTER")
             List<File> pdfFiles = filenames.collect { String filename ->
                 new File(filename)
             }
@@ -153,60 +389,6 @@ task extractMetadata() {
                 println("* * * * *")
                 println("")
             }
-
-            timekeeper.logElapsed()
-        }
-    }
-}
-
-
-task findMatchingPdfContents() {
-    File sourceFolder
-    File destinationFolder
-    doLast {
-        logger.info("STARTING findMatchingPdfContents doLast")
-        if (ProjectHelper.hasAnyTasks(project, [ "findMatchingPdfContents" ])) {
-            SipProcessingState sipProcessingState = new SipProcessingState()
-            if (project.sourceFolderValue == null) {
-                throw new BuildException("Source-folder=${project.sourceFolderValue} cannot be null. Please specify a source folder using -PsourceFolder=<source-folder-value>")
-            }
-            logger.info("sourceFolder=${project.sourceFolderValue}")
-            sourceFolder = new File(project.sourceFolderValue)
-            if (!sourceFolder.exists() || !sourceFolder.isDirectory()) {
-                throw new BuildException("Source-folder=${sourceFolder.getCanonicalPath()} must exist=${sourceFolder.exists()} and must be a directory=${sourceFolder.isDirectory()}")
-            }
-
-            // Need to take the information spreadsheet and find file sets that match
-            // Which means:
-            //  - Given a group of files that match on the [prefix] and [date] (which forms a set of files)
-            //  - Sort the files by name
-            //  - Start from the first file, can we find a match for the MMSID?
-            //      - If so, we've got a result
-            //      - If not, we've got an exception
-
-            FairfaxSpreadsheet fairfaxSpreadsheet = FairfaxSpreadsheet.defaultInstance()
-
-            // TODO Perhaps a 'streaming-like' approach, otherwise we have to find all the files (which could be thousands)
-            // before processing them.
-            // One approach would be to only find files for a certain date mask and step through the dates one by one
-            boolean isRegexNotGlob = true
-            boolean matchFilenameOnly = true
-            boolean sortFiles = true
-            String pattern = ".*?\\.pdf"
-            List<File> filesForProcessing = findFiles(sourceFolder.getAbsolutePath(), isRegexNotGlob, matchFilenameOnly, sortFiles, pattern)
-            logger.info("Collected ${filesForProcessing.size()} files for processing")
-            filesForProcessing.each { File file ->
-                logger.info("File for processing=${file.getCanonicalPath()}")
-            }
-
-            String sipAsXml = FairfaxFilesProcessor.processCollectedFiles(sipProcessingState, fairfaxSpreadsheet,
-                    filesForProcessing)
-            logger.info("Total files processed=${sipProcessingState.totalFilesProcessed}")
-
-            // TODO:
-            // - Write out SIP
-            // - Move SIP and processed files to target folder
-            // - Include any SIP processing exceptions (write to file)
 
             timekeeper.logElapsed()
         }
