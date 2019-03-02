@@ -24,30 +24,141 @@ At this time there is no important information to impart.
 
 ## Usage
 
+### Staged Processing
+
+There are several stages to processing, each of which has its own section:
+
+1. *groupByDateAndName: Grouping the files by date and name*.
+2. *processByDate: Process the files by date*.
+
+The `processFiles` task will perform the `groupByDateAndName` and `processByDate` tasks in sequence.
+
+See the *Parameters* section for a discussion of the different parameters used.
+
+### Other processing
+
+#### listFiles: list files based on source folder
+`listFiles` simply lists files by name, edition and date:
+```
+gradle listFiles \
+    -PstartingDate="yyyyMMdd" \
+    -PendingDate="yyyyMMdd" \
+    -PgenericSourceFolder="/path/to/source/folder"
+```
+
+#### extractMetadata: extract metadata from the pdf files based on source folder
+```
+gradle extractMetadata \
+    -PstartingDate="yyyyMMdd" \
+    -PendingDate="yyyyMMdd" \
+    -PgenericSourceFolder="/path/to/source/folder"
+```
+
+### groupByDateAndName: Grouping the files by date and name
+The first stage of processing where files are separated out by date and name.
+```
+gradle groupByDateAndName \
+    -PstartingDate="yyyyMMdd" \
+    -PendingDate="yyyyMMdd" \
+    -PgroupByDateAndNameSourceFolder="/path/to/source/folder" \
+    -PgroupByDateAndNameDestinationFolder="/path/to/destination/folder" \
+    -PgroupByDateAndNameMoveFiles="false" \
+    -PgroupByDateAndNameCreateDestination="true"
+```
+
+### processByDate: Process the files by date
+The second state of processing where files are aggregated into specific SIPs ready for ingestion into Rosetta.
+```
+gradle processByDate \
+    -PstartingDate="yyyyMMdd" \
+    -PendingDate="yyyyMMdd" \
+    -PprocessByDateSourceFolder="/path/to/source/folder" \
+    -PprocessByDateDestinationFolder="/path/to/destination/folder" \
+    -PprocessByDateMoveFiles="false" \
+    -PprocessByDateCreateDestination="true"
+```
+
 ### Processing files
-Process a set of Fairfax files.
+Does all stages of processing a set of Fairfax files. Currently those stages are `groupByDateAndName` and
+`processByDate`.
 
 Example:
 ```
 gradle processFiles \
-    -PsourceFolder="/path/to/source/folder" \
-    -PdestinationFolder="/path/to/destination/folder"
+    -PstartingDate="yyyyMMdd" \
+    -PendingDate="yyyyMMdd" \
+    -PgroupByDateAndNameSourceFolder="/path/to/source/folder" \
+    -PgroupByDateAndNameDestinationFolder="/path/to/destination/folder" \
+    -PgroupByDateAndNameMoveFiles="false" \
+    -PgroupByDateAndNameCreateDestination="true" \
+    -PprocessByDateSourceFolder="/path/to/source/folder" \
+    -PprocessByDateDestinationFolder="/path/to/destination/folder" \
+    -PprocessByDateMoveFiles="false" \
+    -PprocessByDateCreateDestination="true"
 ```
+
 ### Parameters
 
 Parameters and their usage.
 
-#### sourceFolder
-The source folder of the Fairfax files.
+#### startingDate
+The starting date for file processing (inclusive). Files before this date are ignored. Note that the `startingDate` is based on the
+file name, and not the time stamp of the file. Files usually have the format:
 ```
--PsourceFolder="/path/to/source/folder"
+<Name><Edition>-yyyyMMdd-<optional-sequence-letter><optional-sequence-number>
 ```
 
-#### destinationFolder
-The destination folder for processed files.
-```
--PdestinationFolder="/path/to/destination/folder"
-```
+The format of the starting date is the same format as in the file, namely `yyyyMMdd`.
+
+#### endingDate
+The ending date for file processing (inclusive). Files after this date are ignored. Note that the `endingDate` is based
+on the file name, and not the time stamp of the file. The format of the starting date is the same format as in the file,
+namely `yyyyMMdd`.
+
+#### groupByDateAndNameSourceFolder
+The source folder for `groupByDateAndName` processing. This value must be specified when processing with
+`groupByDateAndName`. The assumption is that all the source files are in the same directory (there are no
+subdirectories).
+
+#### groupByDateAndNameDestinationFolder
+The destination folder for `groupByDateAndName` processing. This value must be specified when processing with
+`groupByDateAndName`. Files that are processed by end up in this folder structure:
+````
+<groupByDateAndNameDestinationFolder>/
+  |- <yyyyMMdd>/<name>/{files-for-the-given-name>
+  |- UNKNOWN/<yyyyMMdd>/{files-that-have-no-name-mapping-for-that-date}
+````
+
+#### groupByDateAndNameMoveFiles
+Whether files are moved or copied to the `groupByDateAndNameDestinationFolder` when processed. The default is `false`.
+
+#### groupByDateAndNameCreateDestination
+Whether the `groupByDateAndNameDestinationFolder` is created if it does not exist when using `groupByDateAndName`
+processing. The default is `false`.
+
+#### processByDateSourceFolder
+The source folder for `processByDate` processing. This value must be specified when processing with `processByDate`. The
+assumption is that all the source files are in the directory structure created by the `groupByDateAndName` processing.
+
+#### processByDateDestinationFolder
+The destination folder for `processByDate` processing. This value must be specified when processing with
+`processByDate`. Files that are processed by end up in this folder structure:
+````
+<processByDateDestinationFolder>/
+  |- <yyyyMMdd>/<ingest-key>/{files-for-the-given-ingest-key>
+  |- UNKNOWN/<yyyyMMdd>/<name>/{files-that-have-no-ingest-key-for-that-date}
+````
+
+#### processByDateMoveFiles
+Whether files are moved or copied to the `processByDateDestinationFolder` when processed. The default is `false`.
+
+#### processByDateCreateDestination
+Whether the `processByDateDestinationFolder` is created if it does not exist when using `processByDate` processing.
+The default is `false`.
+
+#### genericSourceFolder
+The source folder for generic processing, including `listFiles` and `extractMetadata`. This value must be specified.
+Depending on the processing done, the files may need to be in the same folder or may be contained in subdirectories.
 
 ## Contributors
 
@@ -55,4 +166,4 @@ See git commits to see who contributors are. Issues are tracked through the git 
 
 ## License
 
-&copy; 2018 -- 2019 National Library of New Zealand. All rights reserved. MIT license.
+&copy; 2018 &mdash 2019 National Library of New Zealand. All rights reserved. MIT license.
