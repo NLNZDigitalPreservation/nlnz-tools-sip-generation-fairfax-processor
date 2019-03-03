@@ -1,5 +1,6 @@
 import nz.govt.natlib.m11n.tools.automation.logging.Timekeeper
 import nz.govt.natlib.tools.sip.files.FilesFinder
+import nz.govt.natlib.tools.sip.generation.fairfax.FairfaxFilesProcessor
 import nz.govt.natlib.tools.sip.generation.fairfax.FairfaxSpreadsheet
 import nz.govt.natlib.tools.sip.generation.fairfax.FairfaxFile
 import nz.govt.natlib.tools.sip.pdf.PdfInformationExtractor
@@ -213,16 +214,22 @@ task groupByDateAndName(dependsOn: [ ]) {
     }
 }
 
-Closure<List<File>> processNameFolder = { File nameFolder, File destinationFolder, boolean moveFilesToDestination,
-                                          FairfaxSpreadsheet fairfaxSpreadsheet ->
+Closure<Object> copyOrMoveFiles = { List<File> files, File destination, boolean moveFiles ->
+    if (moveFiles) {
+        files.each { File file ->
+            Files.move(file.toPath(), destination.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
+        }
+    } else {
+        files.each { File file ->
+            Files.copy(file.toPath(), destination.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
+        }
+    }
+}
+
+Closure<SipProcessingState> processNameFolder = { File nameFolder, File destinationFolder, String name, String dateString,
+                                          boolean moveFilesToDestination, FairfaxSpreadsheet fairfaxSpreadsheet ->
     List<Files> processedFiles = [ ]
     // Process the files in the name folder
-    // TODO
-    // If the files aren't recognized, then dump the files in an exception folder
-    // Need a method to aggregate files correctly (FairfaxFilesProcessor?)
-    // Move or copy files to destination
-    // Write out SIP processing state to a file (including SipProcessingExceptions)
-    // Note that there may be multiple destinations (as there could be different editions of the same name for a given day).
 
     boolean isRegexNotGlob = true
     boolean matchFilenameOnly = true
@@ -232,11 +239,36 @@ Closure<List<File>> processNameFolder = { File nameFolder, File destinationFolde
     logger.info("Searching for files matching pattern=${pattern}")
 
     List<File> allFiles = findFiles(nameFolder.getAbsolutePath(), isRegexNotGlob, matchFilenameOnly, sortFiles, pattern)
-    allFiles.each { File foundFile ->
-        // TODO This is where the processing occurs
-    }
 
-    return proessedFiles
+    SipProcessingState sipProcessingState = new SipProcessingState()
+    // Process the folder as a single collection of files
+    // TODO Note that there may be multiple destinations (as there could be different editions of the same name for a given day).
+    String sipAsXml = FairfaxFilesProcessor.processCollectedFiles(sipProcessingState, fairfaxSpreadsheet, allFiles)
+
+    File sipAndFilesFolder
+    if (sipProcessingState.complete && sipProcessingState.successful) {
+        sipAndFilesFolder = new File(destinationFolder, "${dateString}/${name}/${sipProcessingState.identifier}")
+    } else {
+        sipAndFilesFolder = new File(destinationFolder, "FAILURE/${dateString}/${name}")
+    }
+    File unrecognizedFilesFolder = new File(destinationFolder, "UNRECOGNIZED/${dateString}/${name}")
+
+    // Move or copy the processed files to the destination folder
+    copyOrMoveFiles(sipProcessingState.validFiles, sipAndFilesFolder, moveFilesToDestination)
+    copyOrMoveFiles(sipProcessingState.invalidFiles, sipAndFilesFolder, moveFilesToDestination)
+
+    // If the files aren't recognized, then dump the files in an exception folder
+    copyOrMoveFiles(sipProcessingState.unrecognizedFiles, unrecognizedFilesFolder, moveFilesToDestination)
+
+    // Write out the SipProcessingState
+    File sipProcessingStateFile = new File(sipAndFilesFolder, "sipProcessingState.txt")
+    sipProcessingStateFile.write(sipProcessingState.toString())
+
+    // Write out the SIP file
+    File sipFile = new File(sipAndFilesFolder, "sip.xml")
+    sipFile.write(sipAsXml)
+
+    return sipProcessingState
 }
 
 task processByDate(dependsOn: [ groupByDateAndName ]) {
@@ -281,13 +313,14 @@ task processByDate(dependsOn: [ groupByDateAndName ]) {
             LocalDate currentDate = startingDate
             while (currentDate.isBefore(endingDate)) {
                 // The folder structure is <sourceFolder>/<date>/<name>/{files}
-                File dateFolder = new File(sourceFolder, FairfaxFile.LOCAL_DATE_TIME_FORMATTER.format(currentDate))
+                String currentDateString = FairfaxFile.LOCAL_DATE_TIME_FORMATTER.format(currentDate)
+                File dateFolder = new File(sourceFolder, currentDateString)
                 if (dateFolder.exists() && dateFolder.isDirectory()) {
                     dateFolder.listFiles().each { File subFile ->
                         if (subFile.isDirectory()) {
                             // we want to process this directory, which should be a <name>
-                            processNameFolder(subFile, destinationFolder, project.processByDateMoveFilesValue,
-                                    fairfaxSpreadsheet)
+                            processNameFolder(subFile, destinationFolder, currentDateString, subFile.getName(),
+                                    project.processByDateMoveFilesValue, fairfaxSpreadsheet)
                         } else {
                             logger.info("Skipping ${subFile.getCanonicalPath()} as not directory=${subFile.isDirectory()}")
                         }
