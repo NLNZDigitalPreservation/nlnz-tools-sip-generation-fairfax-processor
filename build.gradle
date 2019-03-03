@@ -196,7 +196,7 @@ task groupByDateAndName(dependsOn: [ ]) {
                 }
                 // Loop through the dates in sequence, finding and processing files
                 LocalDate currentDate = startingDate
-                while (currentDate.isBefore(endingDate)) {
+                while (currentDate.isBefore(endingDate) || currentDate.isEqual(endingDate)) {
                     pattern = '\\w{6}-' + FairfaxFile.LOCAL_DATE_TIME_FORMATTER.format(currentDate) + '-\\w{3,4}\\.pdf'
                     logger.info("Searching for files matching pattern=${pattern}")
                     List<File> foundFiles = matchFiles(allFiles, pattern)
@@ -205,7 +205,7 @@ task groupByDateAndName(dependsOn: [ ]) {
                         logger.info("Moving=${project.groupByDateAndNameMoveFilesValue} files to destination=${destinationFolder.getCanonicalPath()}")
                         foundFiles.each { File foundFile ->
                             copyOrMoveFileToDateAndNameGroup(destinationFolder, new FairfaxFile(foundFile),
-                                    project.groupByDateAndNameMoveFilesValue)
+                                                            fairfaxSpreadsheet, project.groupByDateAndNameMoveFilesValue)
                         }
                     }
                     currentDate = currentDate.plusDays(1L)
