@@ -83,6 +83,9 @@ configurations {
 Timekeeper timekeeper = new Timekeeper()
 timekeeper.start()
 
+Set<String> recognizedNames = [ ]
+Set<String> unrecognizedNames = [ ]
+
 Closure<LocalDate> parseDate = { String dateString ->
     LocalDate parsedDate = null
     if (dateString != null) {
@@ -121,8 +124,8 @@ Closure<List<File>> matchFiles = { List<File> allFiles, String pattern ->
 }
 
 Closure<Object> copyOrMoveFileToDateAndNameGroup = { File destinationFolder, FairfaxFile targetFile,
-                                                     FairfaxSpreadsheet spreadsheet, boolean moveFile ->
-    String dateFolderName = "${targetFile.dateYear}${targetFile.dateMonthOfYear}${targetFile.dateDayOfMonth}"
+                                                     String dateFolderName, FairfaxSpreadsheet spreadsheet,
+                                                     boolean moveFile ->
     String nameFolderName = targetFile.name
     String folderPath
     Set<String> allNameKeys = spreadsheet.allNameKeys
@@ -130,19 +133,28 @@ Closure<Object> copyOrMoveFileToDateAndNameGroup = { File destinationFolder, Fai
     if (allNameKeys.contains(targetFile.name)) {
         // There's an entry in the spreadsheet for this name
         // Goes to '<date>/<name>/<file>'
+        if (!recognizedNames.contains(targetFile.name)) {
+            recognizedNames.add(targetFile.name)
+            logger.info("copyOrMoveFileToDateAndNameGroup adding recognizedName=${targetFile.name}")
+        }
         folderPath = "${destinationFolder}${File.separator}${dateFolderName}${File.separator}${nameFolderName}"
     } else {
         // There is no entry in the spreadsheet for this name
         // Goes to 'unknown/<date>/<file>'
-        folderPath = "${destinationFolder}${File.separator}unknown{File.separator}${dateFolderName}"
+        if (!unrecognizedNames.contains(targetFile.name)) {
+            unrecognizedNames.add(targetFile.name)
+            logger.info("copyOrMoveFileToDateAndNameGroup adding unrecognizedName=${targetFile.name}")
+        }
+        folderPath = "${destinationFolder}${File.separator}unknown${File.separator}${dateFolderName}"
     }
     File destination = new File(folderPath)
     destination.mkdirs()
 
+    File destinationFile = new File(destination, targetFile.file.getName())
     if (moveFile) {
-        Files.move(targetFile.file.toPath(), destination.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
+        Files.move(targetFile.file.toPath(), destinationFile.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
     } else {
-        Files.copy(targetFile.file.toPath(), destination.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
+        Files.copy(targetFile.file.toPath(), destinationFile.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
     }
 }
 
@@ -167,6 +179,10 @@ task groupByDateAndName(dependsOn: [ ]) {
     }
     doLast {
         if (project.doGroupByDateAndName) {
+            // Clear the set of recognized and unrecognized names before processing begins
+            recognizedNames = [ ]
+            unrecognizedNames = [ ]
+
             logger.info("Starting groupByDateAndName")
             timekeeper.logElapsed()
 
@@ -197,14 +213,15 @@ task groupByDateAndName(dependsOn: [ ]) {
                 // Loop through the dates in sequence, finding and processing files
                 LocalDate currentDate = startingDate
                 while (currentDate.isBefore(endingDate) || currentDate.isEqual(endingDate)) {
-                    pattern = '\\w{6}-' + FairfaxFile.LOCAL_DATE_TIME_FORMATTER.format(currentDate) + '-\\w{3,4}\\.pdf'
+                    String dateString = FairfaxFile.LOCAL_DATE_TIME_FORMATTER.format(currentDate)
+                    pattern = '\\w{6}-' + dateString + '-\\w{3,4}\\.pdf'
                     logger.info("Searching for files matching pattern=${pattern}")
                     List<File> foundFiles = matchFiles(allFiles, pattern)
                     logger.info("Found total files=${foundFiles.size()} matching pattern=${pattern}")
                     if (foundFiles.size() > 0) {
                         logger.info("Moving=${project.groupByDateAndNameMoveFilesValue} files to destination=${destinationFolder.getCanonicalPath()}")
                         foundFiles.each { File foundFile ->
-                            copyOrMoveFileToDateAndNameGroup(destinationFolder, new FairfaxFile(foundFile),
+                            copyOrMoveFileToDateAndNameGroup(destinationFolder, new FairfaxFile(foundFile), dateString,
                                                             fairfaxSpreadsheet, project.groupByDateAndNameMoveFilesValue)
                         }
                     }
@@ -214,8 +231,8 @@ task groupByDateAndName(dependsOn: [ ]) {
                 //String pattern = ".*?\\.pdf"
                 List<File> foundFiles = findFiles(sourceFolder.getAbsolutePath(), isRegexNotGlob, matchFilenameOnly, sortFiles, pattern)
                 foundFiles.each { File foundFile ->
-                    copyOrMoveFileToDateAndNameGroup(destinationFolder, new FairfaxFile(foundFile), fairfaxSpreadsheet,
-                            project.groupByDateAndNameMoveFilesValue)
+                    copyOrMoveFileToDateAndNameGroup(destinationFolder, new FairfaxFile(foundFile), dateString,
+                            fairfaxSpreadsheet, project.groupByDateAndNameMoveFilesValue)
                 }
             }
 
