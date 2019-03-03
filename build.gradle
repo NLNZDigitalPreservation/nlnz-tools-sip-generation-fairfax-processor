@@ -80,6 +80,9 @@ setVersion(project.versionNumber)
 configurations {
 }
 
+Timekeeper timekeeper = new Timekeeper()
+timekeeper.start()
+
 Closure<LocalDate> parseDate = { String dateString ->
     LocalDate parsedDate = null
     if (dateString != null) {
@@ -97,7 +100,12 @@ Closure<List<File>> findFiles = { String localPath, boolean isRegexNotGlob, bool
         return filesList
     }
 
+    logger.info("Finding files for path=${filesPath.toFile().getCanonicalPath()} and pattern=${pattern}")
+    timekeeper.logElapsed()
     filesList = FilesFinder.getMatchingFiles(filesPath, isRegexNotGlob, matchFilenameOnly, sortFiles, pattern)
+    logger.info("Found total files=${filesList.size()} for path=${filesPath.toFile().getCanonicalPath()}")
+    timekeeper.logElapsed()
+
     return filesList
 }
 
@@ -138,9 +146,6 @@ Closure<Object> copyOrMoveFileToDateAndNameGroup = { File destinationFolder, Fai
     }
 }
 
-Timekeeper timekeeper = new Timekeeper()
-timekeeper.start()
-
 task groupByDateAndName(dependsOn: [ ]) {
     File sourceFolder
     File destinationFolder
@@ -162,6 +167,8 @@ task groupByDateAndName(dependsOn: [ ]) {
     }
     doLast {
         if (project.doGroupByDateAndName) {
+            logger.info("Starting groupByDateAndName")
+            timekeeper.logElapsed()
 
             if (project.groupByDateAndNameCreateDestinationValue) {
                 destinationFolder.mkdirs()
@@ -175,11 +182,7 @@ task groupByDateAndName(dependsOn: [ ]) {
             String pattern = '\\w{6}-\\d{8}-\\w{3,4}\\.pdf'
             // Given that we could be dealing with 60,000+ files in the source directory, it's probably more efficient to
             // get them all at once
-            logger.info("About to find all files in sourceFolder=${sourceFolder}")
-            timekeeper.logElapsed()
             List<File> allFiles = findFiles(sourceFolder.getAbsolutePath(), isRegexNotGlob, matchFilenameOnly, sortFiles, pattern)
-            logger.info("Found total=${allFiles.size()} in sourceFolder=${sourceFolder}")
-            timekeeper.logElapsed()
 
             LocalDate startingDate = parseDate((String) project.startingDateValue)
             LocalDate endingDate = parseDate((String) project.endingDateValue)
@@ -197,9 +200,15 @@ task groupByDateAndName(dependsOn: [ ]) {
                     pattern = '\\w{6}-' + FairfaxFile.LOCAL_DATE_TIME_FORMATTER.format(currentDate) + '-\\w{3,4}\\.pdf'
                     logger.info("Searching for files matching pattern=${pattern}")
                     List<File> foundFiles = matchFiles(allFiles, pattern)
-                    foundFiles.each { File foundFile ->
-                        copyOrMoveFileToDateAndNameGroup(destinationFolder, new FairfaxFile(foundFile), fairfaxSpreadsheetproject.groupByDateAndNameMoveFilesValue)
+                    logger.info("Found total files=${foundFiles.size()} matching pattern=${pattern}")
+                    if (foundFiles.size() > 0) {
+                        logger.info("Moving=${project.groupByDateAndNameMoveFilesValue} files to destination=${destinationFolder.getCanonicalPath()}")
+                        foundFiles.each { File foundFile ->
+                            copyOrMoveFileToDateAndNameGroup(destinationFolder, new FairfaxFile(foundFile),
+                                    project.groupByDateAndNameMoveFilesValue)
+                        }
                     }
+                    currentDate = currentDate.plusDays(1L)
                 }
             } else {
                 //String pattern = ".*?\\.pdf"
@@ -209,6 +218,9 @@ task groupByDateAndName(dependsOn: [ ]) {
                             project.groupByDateAndNameMoveFilesValue)
                 }
             }
+
+            logger.info("Ending groupByDateAndName")
+            timekeeper.logElapsed()
         }
 
     }
