@@ -102,8 +102,8 @@ gradle processFiles \
 Parameters and their usage.
 
 #### startingDate
-The starting date for file processing (inclusive). Files before this date are ignored. Note that the `startingDate` is based on the
-file name, and not the time stamp of the file. Files usually have the format:
+The starting date for file processing (inclusive). Files before this date are ignored. Note that the `startingDate` is
+based on the file name, and not the time stamp of the file. Files usually have the format:
 ```
 <Name><Edition>-yyyyMMdd-<optional-sequence-letter><optional-sequence-number>
 ```
