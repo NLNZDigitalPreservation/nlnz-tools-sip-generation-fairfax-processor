@@ -383,8 +383,9 @@ task listFiles(dependsOn: [ ]) {
             unrecognizedNames = [ ]
             Set<FairfaxFileNameEditionKey> recognizedNameEditions = [ ]
             Set<FairfaxFileNameEditionKey> unrecognizedNameEditions = [ ]
+            Set<File> invalidFiles = [ ]
 
-            logger.info("sourceFolder=${project.listFilesSourceFolderValue}")
+            logger.info("sourceFolder=${project.genericSourceFolderValue}")
 
             FairfaxSpreadsheet fairfaxSpreadsheet = FairfaxSpreadsheet.defaultInstance()
             Set<String> allNameKeys = fairfaxSpreadsheet.allNameKeys
@@ -401,29 +402,33 @@ task listFiles(dependsOn: [ ]) {
 
             FairfaxFile previousFile
             fairfaxFiles.each { FairfaxFile fairfaxFile ->
-                if (allNameKeys.contains(fairfaxFile.name)) {
-                    if (!recognizedNames.contains(fairfaxFile.name)) {
-                        recognizedNames.add(fairfaxFile.name)
-                        logger.info("listFiles adding recognizedName=${fairfaxFile.name}")
+                if (fairfaxFile.isValid()) {
+                    if (allNameKeys.contains(fairfaxFile.name)) {
+                        if (!recognizedNames.contains(fairfaxFile.name)) {
+                            recognizedNames.add(fairfaxFile.name)
+                            logger.info("listFiles adding recognizedName=${fairfaxFile.name}")
+                        }
+                    } else {
+                        if (!unrecognizedNames.contains(fairfaxFile.name)) {
+                            unrecognizedNames.add(fairfaxFile.name)
+                            logger.info("listFiles adding unrecognizedName=${fairfaxFile.name}")
+                        }
+                    }
+                    FairfaxFileNameEditionKey fairfaxFileNameEditionKey = new FairfaxFileNameEditionKey(
+                            name: fairfaxFile.name, edition: fairfaxFile.edition)
+                    if (allNameEditionKeys.contains(fairfaxFileNameEditionKey)) {
+                        if (!recognizedNameEditions.contains(fairfaxFileNameEditionKey)) {
+                            recognizedNameEditions.add(fairfaxFileNameEditionKey)
+                            logger.info("listFiles adding recognizedNameEditions=${fairfaxFileNameEditionKey}")
+                        }
+                    } else {
+                        if (!unrecognizedNameEditions.contains(fairfaxFileNameEditionKey)) {
+                            unrecognizedNameEditions.add(fairfaxFileNameEditionKey)
+                            logger.info("listFiles adding unrecognizedNameEditions=${fairfaxFileNameEditionKey}")
+                        }
                     }
                 } else {
-                    if (!unrecognizedNames.contains(fairfaxFile.name)) {
-                        unrecognizedNames.add(fairfaxFile.name)
-                        logger.info("listFiles adding unrecognizedName=${fairfaxFile.name}")
-                    }
-                }
-                FairfaxFileNameEditionKey fairfaxFileNameEditionKey = new FairfaxFileNameEditionKey(
-                        name: fairfaxFile.name, edition: fairfaxFile.edition)
-                if (allNameEditionKeys.contains(fairfaxFileNameEditionKey)) {
-                    if (!recognizedNameEditions.contains(fairfaxFileNameEditionKey)) {
-                        recognizedNameEditions.add(fairfaxFileNameEditionKey)
-                        logger.info("listFiles adding recognizedNameEditions=${fairfaxFileNameEditionKey}")
-                    }
-                } else {
-                    if (!unrecognizedNameEditions.contains(fairfaxFileNameEditionKey)) {
-                        unrecognizedNameEditions.add(fairfaxFileNameEditionKey)
-                        logger.info("listFiles adding unrecognizedNameEditions=${fairfaxFileNameEditionKey}")
-                    }
+                    invalidFiles.add(fairfaxFile.file)
                 }
 
                 if (previousFile != null) {
@@ -461,6 +466,11 @@ task listFiles(dependsOn: [ ]) {
             println("UNRECOGNIZED names and editions:")
             unrecognizedNameEditions.each { FairfaxFileNameEditionKey fairfaxFileNameEditionKey ->
                 println("    ${fairfaxFileNameEditionKey}")
+            }
+            println("* * * *")
+            println("INVALID files:")
+            invalidFiles.each { File file ->
+                println("    ${file.getCanonicalPath()}")
             }
             println("* * * *")
 
