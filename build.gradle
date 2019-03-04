@@ -3,6 +3,7 @@ import nz.govt.natlib.tools.sip.files.FilesFinder
 import nz.govt.natlib.tools.sip.generation.fairfax.FairfaxFilesProcessor
 import nz.govt.natlib.tools.sip.generation.fairfax.FairfaxSpreadsheet
 import nz.govt.natlib.tools.sip.generation.fairfax.FairfaxFile
+import nz.govt.natlib.tools.sip.generation.fairfax.FairfaxFileNameEditionKey
 import nz.govt.natlib.tools.sip.pdf.PdfInformationExtractor
 import nz.govt.natlib.m11n.tools.gradle.BuildException
 import nz.govt.natlib.m11n.tools.gradle.ProjectHelper
@@ -375,9 +376,19 @@ task listFiles(dependsOn: [ ]) {
     }
     doLast {
         if (project.doListFiles) {
-
             println("STARTING listFiles doLast")
+
+            // Clear the set of recognized and unrecognized names before processing begins
+            recognizedNames = [ ]
+            unrecognizedNames = [ ]
+            Set<FairfaxFileNameEditionKey> recognizedNameEditions = [ ]
+            Set<FairfaxFileNameEditionKey> unrecognizedNameEditions = [ ]
+
             logger.info("sourceFolder=${project.listFilesSourceFolderValue}")
+
+            FairfaxSpreadsheet fairfaxSpreadsheet = FairfaxSpreadsheet.defaultInstance()
+            Set<String> allNameKeys = fairfaxSpreadsheet.allNameKeys
+            Set<FairfaxFileNameEditionKey> allNameEditionKeys = fairfaxSpreadsheet.allNameEditionKeys
 
             boolean isRegexNotGlob = true
             boolean matchFilenameOnly = true
@@ -390,6 +401,31 @@ task listFiles(dependsOn: [ ]) {
 
             FairfaxFile previousFile
             fairfaxFiles.each { FairfaxFile fairfaxFile ->
+                if (allNameKeys.contains(fairfaxFile.name)) {
+                    if (!recognizedNames.contains(fairfaxFile.name)) {
+                        recognizedNames.add(fairfaxFile.name)
+                        logger.info("listFiles adding recognizedName=${fairfaxFile.name}")
+                    }
+                } else {
+                    if (!unrecognizedNames.contains(fairfaxFile.name)) {
+                        unrecognizedNames.add(fairfaxFile.name)
+                        logger.info("listFiles adding unrecognizedName=${fairfaxFile.name}")
+                    }
+                }
+                FairfaxFileNameEditionKey fairfaxFileNameEditionKey = new FairfaxFileNameEditionKey(
+                        name: fairfaxFile.name, edition: fairfaxFile.edition)
+                if (allNameEditionKeys.contains(fairfaxFileNameEditionKey)) {
+                    if (!recognizedNameEditions.contains(fairfaxFileNameEditionKey)) {
+                        recognizedNameEditions.add(fairfaxFileNameEditionKey)
+                        logger.info("listFiles adding recognizedNameEditions=${fairfaxFileNameEditionKey}")
+                    }
+                } else {
+                    if (!unrecognizedNameEditions.contains(fairfaxFileNameEditionKey)) {
+                        unrecognizedNameEditions.add(fairfaxFileNameEditionKey)
+                        logger.info("listFiles adding unrecognizedNameEditions=${fairfaxFileNameEditionKey}")
+                    }
+                }
+
                 if (previousFile != null) {
                     if (previousFile.name != fairfaxFile.name) {
                         println("* * * CHANGE OF PREFIX * * *")
@@ -406,6 +442,29 @@ task listFiles(dependsOn: [ ]) {
                 previousFile = fairfaxFile
             }
 
+            println("* * * *")
+            println("Recognized names:")
+            recognizedNames.each { String recognizedName ->
+                println("    ${recognizedName}")
+            }
+            println("* * * *")
+            println("Recognized names and editions:")
+            recognizedNameEditions.each { FairfaxFileNameEditionKey fairfaxFileNameEditionKey ->
+                println("    ${fairfaxFileNameEditionKey}")
+            }
+            println("* * * *")
+            println("UNRECOGNIZED names:")
+            unrecognizedNames.each { String recognizedName ->
+                println("    ${recognizedName}")
+            }
+            println("* * * *")
+            println("UNRECOGNIZED names and editions:")
+            unrecognizedNameEditions.each { FairfaxFileNameEditionKey fairfaxFileNameEditionKey ->
+                println("    ${fairfaxFileNameEditionKey}")
+            }
+            println("* * * *")
+
+            println("ENDING listFiles doLast")
             timekeeper.logElapsed()
         }
     }
