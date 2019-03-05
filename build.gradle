@@ -304,7 +304,7 @@ Closure<SipProcessingState> processNameFolder = { File nameFolder, File destinat
     sipProcessingStateFile.write(sipProcessingState.toString())
 
     // Write out the SIP file
-    File sipFile = new File(sipAndFilesFolder, "sip.xml")
+    File sipFile = new File(sipAndFilesFolder, "mets.xml")
     sipFile.write(sipAsXml)
 
     return sipProcessingState
@@ -352,7 +352,7 @@ task processByDate(dependsOn: [ groupByDateAndName ]) {
 
             // Loop through the dates in sequence, finding and processing files
             LocalDate currentDate = startingDate
-            while (currentDate.isBefore(endingDate)) {
+            while (currentDate.isBefore(endingDate) || currentDate.equals(endingDate)) {
                 // The folder structure is <sourceFolder>/<date>/<name>/{files}
                 String currentDateString = FairfaxFile.LOCAL_DATE_TIME_FORMATTER.format(currentDate)
                 File dateFolder = new File(sourceFolder, currentDateString)
@@ -369,6 +369,7 @@ task processByDate(dependsOn: [ groupByDateAndName ]) {
                 } else {
                     logger.info("Skipping ${dateFolder.getCanonicalPath()} as exists=${dateFolder.exists()}, directory=${dateFolder.isDirectory()}")
                 }
+                currentDate = currentDate.plusDays(1L)
             }
         }
     }
@@ -613,7 +614,10 @@ task copyProdLoadToTestStructures() {
         String pattern = '\\w{6}-\\d{8}-.*?\\.pdf'
         String directoryPattern = '(?<name>\\w{3,6})_(?<date>\\d{8})'
 
+        logger.info("Processing filteredDirectories total=${filteredDirectoriesList.size()}")
+        int filteredDirectoriesCount = 1
         filteredDirectoriesList.each { File sourceDirectory ->
+            logger.info("Processing ${filteredDirectoriesCount}/${filteredDirectoriesList.size()}, current=${sourceDirectory.getCanonicalPath()}")
             Matcher matcher = sourceDirectory.getName() =~ /${directoryPattern}/
             String dateString
             String nameString
@@ -649,7 +653,9 @@ task copyProdLoadToTestStructures() {
             groupByDateAndNameDestinationFolder.mkdirs()
             sourceFiles.each { File sourceFile ->
                 File destinationFile = new File(groupByDateAndNameDestinationFolder, sourceFile.getName())
-                Files.copy(sourceFile.toPath(), destinationFile.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
+                if (!destinationFile.exists()) {
+                    Files.copy(sourceFile.toPath(), destinationFile.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
+                }
             }
 
             /// Copy to the post-processByDate structure
@@ -657,8 +663,11 @@ task copyProdLoadToTestStructures() {
             rosettaIngestFolder.mkdirs()
             sourceFiles.each { File sourceFile ->
                 File destinationFile = new File(rosettaIngestFolder, sourceFile.getName())
-                Files.copy(sourceFile.toPath(), destinationFile.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
+                if (!destinationFile.exists()) {
+                    Files.copy(sourceFile.toPath(), destinationFile.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
+                }
             }
+            filteredDirectoriesCount += 1
         }
     }
 }
