@@ -41,6 +41,7 @@ project.ext {
     endingDateValue = project.hasProperty('endingDate') ? project.endingDate : null
 
     genericSourceFolderValue = project.hasProperty('genericSourceFolder') ? project.genericSourceFolder : null
+    genericDestinationFolderValue = project.hasProperty('genericDestinationFolder') ? project.genericDestinationFolder : null
 
     // Task groupByDateAndName
     doGroupByDateAndName = ProjectHelper.hasAnyTasks(project, [ "groupByDateAndName", "processFiles" ])
@@ -253,11 +254,13 @@ task groupByDateAndName(dependsOn: [ ]) {
 Closure<Object> copyOrMoveFiles = { List<File> files, File destination, boolean moveFiles ->
     if (moveFiles) {
         files.each { File file ->
-            Files.move(file.toPath(), destination.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
+            File destinationFile = new File(destination, file.getName())
+            Files.move(file.toPath(), destinationFile.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
         }
     } else {
         files.each { File file ->
-            Files.copy(file.toPath(), destination.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
+            File destinationFile = new File(destination, file.getName())
+            Files.copy(file.toPath(), destinationFile.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
         }
     }
 }
@@ -611,7 +614,7 @@ task copyProdLoadToTestStructures() {
         String directoryPattern = '(?<name>\\w{3,6})_(?<date>\\d{8})'
 
         filteredDirectoriesList.each { File sourceDirectory ->
-            Matcher matcher = directory.getName() =~ /${directoryPattern}/
+            Matcher matcher = sourceDirectory.getName() =~ /${directoryPattern}/
             String dateString
             String nameString
             if (matcher.matches()) {
@@ -625,10 +628,10 @@ task copyProdLoadToTestStructures() {
             File contentFolder = new File(sourceDirectory, "content")
             if (contentFolder.exists()) {
                 File metsFile = new File(contentFolder, "mets.xml")
-                if (metsFiles.exists()) {
+                if (metsFile.exists()) {
                     sourceFiles.add(metsFile)
                 } else {
-                    logger.info("streamsFolder=${streamsFolder.getCanonicalPath()} does not exist -- SKIPPING")
+                    logger.info("metsFile=${metsFile.getCanonicalPath()} does not exist -- SKIPPING")
                 }
                 File streamsFolder = new File(contentFolder, "streams")
                 if (streamsFolder.exists()) {
@@ -645,14 +648,16 @@ task copyProdLoadToTestStructures() {
             File groupByDateAndNameDestinationFolder = new File(destinationFolder, "groupByDateAndName/${dateString}/${nameString}")
             groupByDateAndNameDestinationFolder.mkdirs()
             sourceFiles.each { File sourceFile ->
-                Files.copy(sourceFile.toPath(), groupByDateAndNameDestinationFolder.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
+                File destinationFile = new File(groupByDateAndNameDestinationFolder, sourceFile.getName())
+                Files.copy(sourceFile.toPath(), destinationFile.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
             }
 
             /// Copy to the post-processByDate structure
             File rosettaIngestFolder = new File(destinationFolder, "rosettaIngest/${dateString}/${nameString}_${dateString}")
             rosettaIngestFolder.mkdirs()
             sourceFiles.each { File sourceFile ->
-                Files.copy(sourceFile.toPath(), rosettaIngestFolder.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
+                File destinationFile = new File(rosettaIngestFolder, sourceFile.getName())
+                Files.copy(sourceFile.toPath(), destinationFile.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
             }
         }
     }
