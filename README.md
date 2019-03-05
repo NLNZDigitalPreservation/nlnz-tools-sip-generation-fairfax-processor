@@ -54,6 +54,24 @@ gradle extractMetadata \
     -PgenericSourceFolder="/path/to/source/folder"
 ```
 
+#### copyProdLoadToTestStructures: Copy production load files
+Copies files from previous production loads into Rosetta into groupByDateAndName *and* pre-Rosetta ingest structures
+for testing. The structures are as follows:
+1. groupByDateAndName structure. This is to mimic the input to processByName.
+   Directory structure: groupByDateAndName/<yyyyMMdd>/<name>/{files}
+2. post-processByDate structure. This is the structure that gets ingested into Rosetta.
+   Directory structure: rosettaIngest/<date-in-yyyMMdd>/<name>_<yyyyMMdd>/{files}
+
+These structures provide for testing the Fairfax processor, to see if its outputs match the work done previously.
+
+```
+gradle copyProdLoadToTestStructures \
+    -PstartingDate="yyyyMMdd" \
+    -PendingDate="yyyyMMdd" \
+    -PgenericSourceFolder="/path/to/source/folder" \
+    -PgenericDestinationFolder="/path/to/destination/folder"
+```
+
 ### groupByDateAndName: Grouping the files by date and name
 The first stage of processing where files are separated out by date and name.
 ```

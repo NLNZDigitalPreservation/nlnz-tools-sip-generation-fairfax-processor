@@ -13,6 +13,7 @@ import java.nio.file.Files
 import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
 import java.time.LocalDate
+import java.util.regex.Matcher
 
 buildscript {
     repositories {
@@ -72,6 +73,8 @@ project.ext {
     // Task extractMetadata
     doExtractMetadata = ProjectHelper.hasAnyTasks(project, [ "extractMetadata" ])
 
+    // Task copyProdLoadToTestStructures
+    doCopyProdLoadToTestStructures = ProjectHelper.hasAnyTasks(project, [ "copyProdLoadToTestStructures" ])
 }
 
 apply plugin: 'base'
@@ -141,12 +144,12 @@ Closure<Object> copyOrMoveFileToDateAndNameGroup = { File destinationFolder, Fai
         folderPath = "${destinationFolder}${File.separator}${dateFolderName}${File.separator}${nameFolderName}"
     } else {
         // There is no entry in the spreadsheet for this name
-        // Goes to 'unknown/<date>/<file>'
+        // Goes to 'UNKNOWN/<date>/<file>'
         if (!unrecognizedNames.contains(targetFile.name)) {
             unrecognizedNames.add(targetFile.name)
             logger.info("copyOrMoveFileToDateAndNameGroup adding unrecognizedName=${targetFile.name}")
         }
-        folderPath = "${destinationFolder}${File.separator}unknown${File.separator}${dateFolderName}"
+        folderPath = "${destinationFolder}${File.separator}UNKNOWN${File.separator}${dateFolderName}"
     }
     File destination = new File(folderPath)
     destination.mkdirs()
@@ -159,6 +162,9 @@ Closure<Object> copyOrMoveFileToDateAndNameGroup = { File destinationFolder, Fai
     }
 }
 
+// The groupByDateAndName structure is the following in the destinationFolder:
+// |- <yyyyMMdd>/<name>/{files}
+// |- UNKNOWN/<yyyyMMdd>/{files}
 task groupByDateAndName(dependsOn: [ ]) {
     File sourceFolder
     File destinationFolder
@@ -301,6 +307,8 @@ Closure<SipProcessingState> processNameFolder = { File nameFolder, File destinat
     return sipProcessingState
 }
 
+// The processByDate destinationFolder structure is the following:
+// |- <date-in-yyyMMdd>/<name>_<yyyyMMdd>-<identifier>/{files}
 task processByDate(dependsOn: [ groupByDateAndName ]) {
     File sourceFolder
     File destinationFolder
@@ -522,6 +530,130 @@ task extractMetadata() {
             }
 
             timekeeper.logElapsed()
+        }
+    }
+}
+
+Closure<List<File>> findProdLoadDirectoriesBetweenDates = { String localPath, LocalDate startingDate,
+                                                            LocalDate endingDate ->
+    List<File> directoriesList = [ ]
+    java.nio.file.Path filesPath = Paths.get(localPath)
+    if (!Files.exists(filesPath) || !Files.isDirectory(filesPath)) {
+        logger.warn("Path '${filesPath}' does not exist is not a directory. Returning empty file list.")
+        return directoriesList
+    }
+
+    boolean isRegexNotGlob = true
+    boolean matchFilenameOnly = true
+    boolean sortFiles = true
+    boolean includeSubdirectories = true
+    boolean directoryOnly = true
+
+    // Load directories have the structure <name>_<yyyyMMdd> (and possibly <name><edition>_<yyyyMMdd>
+    String pattern = '\\w{3,6}_\\d{8}'
+    logger.info("Finding directories for path=${filesPath.toFile().getCanonicalPath()} and pattern=${pattern}")
+    timekeeper.logElapsed()
+    directoriesList = FilesFinder.getMatchingFilesFull(filesPath, isRegexNotGlob, matchFilenameOnly, sortFiles,
+            includeSubdirectories, directoryOnly, pattern)
+    logger.info("Found total directories=${directoriesList.size()} for path=${filesPath.toFile().getCanonicalPath()}")
+    timekeeper.logElapsed()
+
+    List<File> filteredDirectoriesList = [ ]
+    String regexPattern = '(?<name>\\w{3,6})_(?<date>\\d{8})'
+    directoriesList.each { File directory ->
+        Matcher matcher = directory.getName() =~ /${regexPattern}/
+        if (matcher.matches()) {
+            String dateString = matcher.group('date')
+            LocalDate directoryDate = parseDate(dateString)
+            if ((directoryDate.isEqual(startingDate) || directoryDate.isAfter(startingDate)) &&
+                    (directoryDate.isBefore(endingDate) || directoryDate.isEqual(endingDate))) {
+                filteredDirectoriesList.add(directory)
+            }
+        }
+    }
+    return filteredDirectoriesList
+}
+
+// Copies the prod load structure to two structures:
+// 1. groupByDateAndName structure. This is to mimic the input to processByName.
+//    Directory structure: groupByDateAndName/<yyyyMMdd>/<name>/{files}
+// 2. post-processByDate structure. This is the structure that gets ingested into Rosetta.
+//    Directory structure: rosettaIngest/<date-in-yyyMMdd>/<name>_<yyyyMMdd>-<identifier>/{files}
+// These structures provide for testing the Fairfax processor, to see if its outputs match the work done previously.
+task copyProdLoadToTestStructures() {
+    File sourceFolder
+    File destinationFolder
+    if (project.doCopyProdLoadToTestStructures) {
+        if (project.genericSourceFolderValue == null) {
+            throw new BuildException("Source-folder=${project.genericSourceFolderValue} cannot be null. Please specify a source folder using -PgenericSourceFolder=<source-folder-value>")
+        }
+        sourceFolder = new File((String) project.genericSourceFolderValue)
+        if (project.genericDestinationFolderValue == null) {
+            throw new BuildException("Destination-folder=${project.genericDestinationFolderValue} cannot be null. Please specify a destination folder using -PgenericDestinationFolder=<destination-folder-value>")
+        }
+        destinationFolder = new File((String) project.genericDestinationFolderValue)
+    }
+    doLast {
+        LocalDate startingDate = parseDate((String) project.startingDateValue)
+        LocalDate endingDate = parseDate((String) project.endingDateValue)
+
+        // The source files are going to be in a subdirectory with the directory structure being:
+        // <name>_yyyyMMdd/content/streams/{files} with the mets.xml in the content directory.
+        // Find the source directories that are between the starting date and the ending date
+        List<File> filteredDirectoriesList = findProdLoadDirectoriesBetweenDates(sourceFolder.getCanonicalPath(),
+                                                                                startingDate, endingDate)
+
+        // We need to copy the files to the groupByDateAndName structure AND the post-processByDate structure.
+        boolean isRegexNotGlob = true
+        boolean matchFilenameOnly = true
+        boolean sortFiles = true
+        String pattern = '\\w{6}-\\d{8}-.*?\\.pdf'
+        String directoryPattern = '(?<name>\\w{3,6})_(?<date>\\d{8})'
+
+        filteredDirectoriesList.each { File sourceDirectory ->
+            Matcher matcher = directory.getName() =~ /${directoryPattern}/
+            String dateString
+            String nameString
+            if (matcher.matches()) {
+                dateString = matcher.group('date')
+                nameString = matcher.group('name')
+            } else {
+                dateString = "UNKNOWN-DATE"
+                nameString = "UNKNOWN-NAME"
+            }
+            List<File> sourceFiles = [ ]
+            File contentFolder = new File(sourceDirectory, "content")
+            if (contentFolder.exists()) {
+                File metsFile = new File(contentFolder, "mets.xml")
+                if (metsFiles.exists()) {
+                    sourceFiles.add(metsFile)
+                } else {
+                    logger.info("streamsFolder=${streamsFolder.getCanonicalPath()} does not exist -- SKIPPING")
+                }
+                File streamsFolder = new File(contentFolder, "streams")
+                if (streamsFolder.exists()) {
+                    List<File> pdfFiles = findFiles(streamsFolder.getAbsolutePath(), isRegexNotGlob, matchFilenameOnly, sortFiles, pattern)
+                    sourceFiles.addAll(pdfFiles)
+                } else {
+                    logger.info("streamsFolder=${streamsFolder.getCanonicalPath()} does not exist -- SKIPPING")
+                }
+            } else {
+                logger.info("contentFolder=${contentFolder.getCanonicalPath()} does not exist -- SKIPPING")
+            }
+
+            // Copy to the groupByDateAndName structure
+            File groupByDateAndNameDestinationFolder = new File(destinationFolder, "groupByDateAndName/${dateString}/${nameString}")
+            groupByDateAndNameDestinationFolder.mkdirs()
+            sourceFiles.each { File sourceFile ->
+                Files.copy(sourceFile.toPath(), groupByDateAndNameDestinationFolder.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
+            }
+
+            /// Copy to the post-processByDate structure
+            File rosettaIngestFolder = new File(destinationFolder, "rosettaIngest/${dateString}/${nameString}_${dateString}")
+            rosettaIngestFolder.mkdirs()
+            sourceFiles.each { File sourceFile ->
+                Files.copy(sourceFile.toPath(), rosettaIngestFolder.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
+            }
         }
     }
 }
