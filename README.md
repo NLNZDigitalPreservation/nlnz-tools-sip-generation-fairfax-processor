@@ -2,6 +2,13 @@
 
 Build script for Fairfax-based SIPs for ingestion into the Rosetta archive system.
 
+## NO LONGER ACTIVE
+
+*Note* that this project is no longer active, as the processing functionality has been moved to the
+`sip-generation-fairfax-processor` project/subproject (see
+https://github.com/NLNZDigitalPreservation/nlnz-tools-sip-generation-fairfax). Please see that project's `README.md`
+for more information about Fairfax files processing. 
+
 ## Synopsis
 
 Builds Fairfax-based SIPs for ingestion into the Rosetta archive system.
@@ -184,4 +191,4 @@ See git commits to see who contributors are. Issues are tracked through the git 
 
 ## License
 
-&copy; 2018 &mdash 2019 National Library of New Zealand. All rights reserved. MIT license.
+&copy; 2018 &mdash; 2019 National Library of New Zealand. All rights reserved. MIT license.
